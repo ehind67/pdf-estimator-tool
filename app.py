@@ -129,6 +129,7 @@ class PDFComplexityAssessor:
             "Tier 2": 17.50,
             "Tier 3": 35.00
         }
+        MIN_CHARGE = 25.00
         
         # Rush Multiplier (2x if checked, 1x if not)
         multiplier = 2.0 if self.is_rush_order else 1.0
@@ -137,15 +138,22 @@ class PDFComplexityAssessor:
         t2_cost = self.report["tiers"]["Tier 2"] * rates["Tier 2"] * multiplier
         t3_cost = self.report["tiers"]["Tier 3"] * rates["Tier 3"] * multiplier
         
-        total = t1_cost + t2_cost + t3_cost
-        self.report["estimated_cost"] = round(total, 2)
+        # Calculate Raw Total
+        raw_total = t1_cost + t2_cost + t3_cost
+        
+        # Apply Minimum Charge Logic
+        final_total = max(raw_total, MIN_CHARGE)
+        min_applied = raw_total < MIN_CHARGE
+        
+        self.report["estimated_cost"] = round(final_total, 2)
         
         # Store breakdown for display
         self.report["pricing_breakdown"] = {
             "Tier 1 Total": round(t1_cost, 2),
             "Tier 2 Total": round(t2_cost, 2),
             "Tier 3 Total": round(t3_cost, 2),
-            "Rush Multiplier Applied": "Yes (2x)" if self.is_rush_order else "No"
+            "Rush Multiplier Applied": "Yes (2x)" if self.is_rush_order else "No",
+            "Minimum Applied": min_applied
         }
 
 # --- MAIN APP UI ---
@@ -157,7 +165,7 @@ st.markdown("### Accessibility Remediation Estimator")
 with st.sidebar:
     st.header("⚙️ Settings")
     
-    # NEW: Rush Order Checkbox
+    # Rush Order Checkbox
     is_rush = st.checkbox("🚀 Rush Processing (48hr)", value=False, help="Doubles the tier rates for expedited delivery.")
     
     st.divider()
@@ -166,6 +174,7 @@ with st.sidebar:
     * **Tier 1 (Simple):** $10.00/pg
     * **Tier 2 (Structured):** $17.50/pg
     * **Tier 3 (Complex):** $35.00/pg
+    * **Min. Charge:** $25.00
     
     *Rush processing applies 2x multiplier.*
     """)
@@ -224,9 +233,11 @@ if uploaded_file is not None:
             
             if is_rush:
                  st.markdown("---")
-                 st.write("🔴 **Rush Surcharge Applied**")
+                 st.write("🔴 **Rush Surcharge Applied (2x)**")
+            
+            if p_data["Minimum Applied"]:
+                st.markdown("---")
+                st.warning("⚠️ Minimum Project Fee ($25.00) Applied")
             
             st.markdown("---")
             st.write(f"### Total: ${result['estimated_cost']}")
-
-        # Removed Proposal Language Section as requested
