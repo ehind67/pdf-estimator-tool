@@ -16,7 +16,6 @@ st.set_page_config(
 # --- CSS FOR STYLING (Compact View) ---
 st.markdown("""
 <style>
-    /* Reduce the huge padding Streamlit puts at the top */
     .block-container {
         padding-top: 2rem;
         padding-bottom: 2rem;
@@ -29,7 +28,6 @@ st.markdown("""
     div[data-testid="stMetricLabel"] {
         font-size: 0.9rem !important;
     }
-    /* Compact the dividers */
     hr {
         margin-top: 1rem;
         margin-bottom: 1rem;
@@ -73,8 +71,6 @@ class PDFComplexityAssessor:
             for i, page in enumerate(pdf.pages):
                 progress = (i + 1) / self.report["total_pages"]
                 progress_bar.progress(progress)
-                # status_text.text(f"Scanning page {i+1}...") # Removed text to save space
-                
                 self._assess_page(page, i + 1)
 
             status_text.empty()
@@ -195,26 +191,34 @@ if uploaded_file is not None:
 
     if result:
         st.divider()
+
+        # --- 1. HEADER & STATUS CALLOUT ---
+        # Using columns to put File Name and Status side-by-side
+        h_col1, h_col2 = st.columns([3, 1])
         
-        # --- 1. COMPACT METRICS ---
-        c1, c2, c3, c4 = st.columns(4)
+        with h_col1:
+            st.markdown(f"### 📂 {uploaded_file.name}")
+        
+        with h_col2:
+            if result["is_tagged"]:
+                st.success("✅ Tagged / PDF/UA Ready")
+            else:
+                st.error("⚠️ Untagged / Critical")
+
+        st.markdown("---") # Thin separator
+        
+        # --- 2. COMPACT METRICS (3 Columns Only) ---
+        c1, c2, c3 = st.columns(3)
         c1.metric("Pages", result["total_pages"])
-        c1.caption("Document Length")
-        
-        tag_status = "Tagged" if result["is_tagged"] else "Untagged"
-        c2.metric("Structure", tag_status, delta="OK" if result["is_tagged"] else "Check", delta_color="normal" if result["is_tagged"] else "off")
-        c2.caption("PDF/UA Readiness")
 
         rush_label = "Active (2x)" if is_rush else "Standard"
-        c3.metric("Mode", rush_label)
-        c3.caption("Processing Speed")
+        c2.metric("Mode", rush_label)
 
-        c4.metric("Est. Quote", f"${result['estimated_cost']:.2f}")
-        c4.caption("Total Project Fee")
+        c3.metric("Est. Quote", f"${result['estimated_cost']:.2f}")
 
         st.divider()
 
-        # --- 2. LINE ITEMS SUMMARY (MOVED UP) ---
+        # --- 3. LINE ITEMS SUMMARY ---
         st.markdown("##### 🧾 Line Items Summary")
         
         # Create a clean dataframe for display
@@ -227,23 +231,21 @@ if uploaded_file is not None:
             ["Tier 3 (Complex/Tables)",f"{result['tiers']['Tier 3']} pgs", f"${p_data['Tier 3 Total']:.2f}"],
         ]
         
-        # Convert to DataFrame for a clean table look
+        # Convert to DataFrame
         df_display = pd.DataFrame(rows, columns=["Item Description", "Quantity", "Subtotal"])
         st.dataframe(df_display, use_container_width=True, hide_index=True)
 
-        # Show Rush/Min warnings in small text
         if is_rush:
             st.caption("🔴 *Rush surcharge (2x) included in subtotals above.*")
         
         if p_data["Minimum Applied"]:
             st.warning("⚠️ Minimum Project Floor ($25.00) Applied")
 
-        # --- 3. COST BREAKDOWN GRAPH (MOVED DOWN) ---
+        # --- 4. COST BREAKDOWN GRAPH ---
         st.markdown("##### 📊 Page Tier Distribution")
         
         chart_data = {
             "Tier": ["Tier 1", "Tier 2", "Tier 3"],
             "Pages": [result["tiers"]["Tier 1"], result["tiers"]["Tier 2"], result["tiers"]["Tier 3"]]
         }
-        # Using a smaller height for the chart to fit better
         st.bar_chart(data=chart_data, x="Tier", y="Pages", color=["#4CAF50"], height=250)
