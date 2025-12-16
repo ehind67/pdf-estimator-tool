@@ -1,12 +1,3 @@
-Here is the updated code.
-
-**Changes made:**
-
-1. **Compacted Layout:** I moved the "Line Items" summary *above* the graph as requested.
-2. **Reduced Font Sizes:** I added custom CSS to shrink the "Metric" numbers (so they aren't huge) and reduced the header sizes throughout the results section to make everything fit on one screen without scrolling.
-3. **Refined Visuals:** I switched the "Line Items" to a clean, compact data table format instead of a bulleted list to save vertical space.
-
-###**Updated Code (`app.py`)**```python
 import streamlit as st
 import pikepdf
 from pdfminer.layout import LTTextContainer
