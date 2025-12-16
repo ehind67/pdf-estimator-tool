@@ -1,9 +1,19 @@
+Here is the updated code.
+
+**Changes made:**
+
+1. **Compacted Layout:** I moved the "Line Items" summary *above* the graph as requested.
+2. **Reduced Font Sizes:** I added custom CSS to shrink the "Metric" numbers (so they aren't huge) and reduced the header sizes throughout the results section to make everything fit on one screen without scrolling.
+3. **Refined Visuals:** I switched the "Line Items" to a clean, compact data table format instead of a bulleted list to save vertical space.
+
+###**Updated Code (`app.py`)**```python
 import streamlit as st
 import pikepdf
 from pdfminer.layout import LTTextContainer
 from pdfminer.high_level import extract_pages
 import tempfile
 import os
+import pandas as pd
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
@@ -12,17 +22,26 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- CSS FOR STYLING ---
+# --- CSS FOR STYLING (Compact View) ---
 st.markdown("""
 <style>
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 20px;
-        border-radius: 10px;
-        text-align: center;
+    /* Reduce the huge padding Streamlit puts at the top */
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
     }
-    .stAlert {
-        font-weight: bold;
+    /* Shrink the big Metric numbers */
+    div[data-testid="stMetricValue"] {
+        font-size: 1.5rem !important;
+    }
+    /* Shrink Metric Labels */
+    div[data-testid="stMetricLabel"] {
+        font-size: 0.9rem !important;
+    }
+    /* Compact the dividers */
+    hr {
+        margin-top: 1rem;
+        margin-bottom: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -55,16 +74,15 @@ class PDFComplexityAssessor:
             except (AttributeError, KeyError):
                 self.report["is_tagged"] = False
 
-            # Progress Bar
+            # Progress Bar (Small)
             progress_bar = st.progress(0)
             status_text = st.empty()
 
             # Page Loop
             for i, page in enumerate(pdf.pages):
-                # Update progress
                 progress = (i + 1) / self.report["total_pages"]
                 progress_bar.progress(progress)
-                status_text.text(f"Scanning page {i+1}...")
+                # status_text.text(f"Scanning page {i+1}...") # Removed text to save space
                 
                 self._assess_page(page, i + 1)
 
@@ -90,16 +108,16 @@ class PDFComplexityAssessor:
                     page_score += 5
         self.report["elements"]["forms"] += forms_found
 
-        # 2. Content Density (Heuristic for Tables/Vectors)
+        # 2. Content Density
         try:
             raw_len = len(page.read_bytes())
-            if raw_len > 15000: # Threshold for "Heavy" page
+            if raw_len > 15000: 
                 self.report["elements"]["tables_suspected"] += 1
                 page_score += 10
         except:
             pass
             
-        # 3. Images (XObjects)
+        # 3. Images
         if "/Resources" in page and "/XObject" in page.Resources:
             try:
                 img_count = len(page.Resources.XObject.keys())
@@ -123,7 +141,7 @@ class PDFComplexityAssessor:
         )
 
     def _calculate_pricing(self):
-        # NEW: Hardcoded Rates
+        # Rates
         rates = {
             "Tier 1": 10.00,
             "Tier 2": 17.50,
@@ -131,23 +149,22 @@ class PDFComplexityAssessor:
         }
         MIN_CHARGE = 25.00
         
-        # Rush Multiplier (2x if checked, 1x if not)
+        # 1. Apply Multiplier
         multiplier = 2.0 if self.is_rush_order else 1.0
         
         t1_cost = self.report["tiers"]["Tier 1"] * rates["Tier 1"] * multiplier
         t2_cost = self.report["tiers"]["Tier 2"] * rates["Tier 2"] * multiplier
         t3_cost = self.report["tiers"]["Tier 3"] * rates["Tier 3"] * multiplier
         
-        # Calculate Raw Total
         raw_total = t1_cost + t2_cost + t3_cost
         
-        # Apply Minimum Charge Logic
+        # 2. Min Charge Logic
         final_total = max(raw_total, MIN_CHARGE)
         min_applied = raw_total < MIN_CHARGE
         
         self.report["estimated_cost"] = round(final_total, 2)
         
-        # Store breakdown for display
+        # Store formatted breakdown
         self.report["pricing_breakdown"] = {
             "Tier 1 Total": round(t1_cost, 2),
             "Tier 2 Total": round(t2_cost, 2),
@@ -159,85 +176,85 @@ class PDFComplexityAssessor:
 # --- MAIN APP UI ---
 
 st.title("📄 PDF Scope & Scan")
-st.markdown("### Accessibility Remediation Estimator")
 
-# Sidebar: Simple Settings
+# Sidebar
 with st.sidebar:
     st.header("⚙️ Settings")
-    
-    # Rush Order Checkbox
-    is_rush = st.checkbox("🚀 Rush Processing (48hr)", value=False, help="Doubles the tier rates for expedited delivery.")
-    
+    is_rush = st.checkbox("🚀 Rush (48hr)", value=False, help="Doubles rates. Does not double min charge.")
     st.divider()
-    st.info("""
-    **Standard Pricing:**
-    * **Tier 1 (Simple):** $10.00/pg
-    * **Tier 2 (Structured):** $17.50/pg
-    * **Tier 3 (Complex):** $35.00/pg
-    * **Min. Charge:** $25.00
-    
-    *Rush processing applies 2x multiplier.*
+    st.caption("""
+    **Pricing Model:**
+    * **T1 (Simple):** $10.00/pg
+    * **T2 (Struct):** $17.50/pg
+    * **T3 (Complex):** $35.00/pg
+    * **Min Floor:** $25.00
     """)
 
-# Main Area: File Upload
-uploaded_file = st.file_uploader("Upload a PDF to Analyze", type=["pdf"])
+# File Upload
+uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
 
 if uploaded_file is not None:
-    # Save to temp file
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         tmp_file.write(uploaded_file.getbuffer())
         tmp_path = tmp_file.name
 
-    # Run Analysis (Pass in the rush status)
     assessor = PDFComplexityAssessor(tmp_path, is_rush)
     result = assessor.analyze()
-    
-    # Clean up temp file
     os.remove(tmp_path)
 
     if result:
         st.divider()
         
-        # TOP LINE METRICS
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Pages", result["total_pages"])
-        with col2:
-            tag_status = "Tagged" if result["is_tagged"] else "Untagged"
-            st.metric("Structure", tag_status, delta="OK" if result["is_tagged"] else "Check", delta_color="normal" if result["is_tagged"] else "off")
-        with col3:
-            rush_label = "Active (2x)" if is_rush else "Standard"
-            st.metric("Processing Mode", rush_label)
-        with col4:
-            st.metric("Est. Quote", f"${result['estimated_cost']}", delta="Total Project")
+        # --- 1. COMPACT METRICS ---
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Pages", result["total_pages"])
+        c1.caption("Document Length")
+        
+        tag_status = "Tagged" if result["is_tagged"] else "Untagged"
+        c2.metric("Structure", tag_status, delta="OK" if result["is_tagged"] else "Check", delta_color="normal" if result["is_tagged"] else "off")
+        c2.caption("PDF/UA Readiness")
 
-        # DETAILED BREAKDOWN
-        st.subheader("📊 Cost Breakdown")
+        rush_label = "Active (2x)" if is_rush else "Standard"
+        c3.metric("Mode", rush_label)
+        c3.caption("Processing Speed")
+
+        c4.metric("Est. Quote", f"${result['estimated_cost']:.2f}")
+        c4.caption("Total Project Fee")
+
+        st.divider()
+
+        # --- 2. LINE ITEMS SUMMARY (MOVED UP) ---
+        st.markdown("##### 🧾 Line Items Summary")
         
-        c1, c2 = st.columns([2, 1])
+        # Create a clean dataframe for display
+        p_data = result["pricing_breakdown"]
         
-        with c1:
-            # Show breakdown chart
-            chart_data = {
-                "Tier": ["Tier 1 ($10)", "Tier 2 ($17.50)", "Tier 3 ($35)"],
-                "Pages": [result["tiers"]["Tier 1"], result["tiers"]["Tier 2"], result["tiers"]["Tier 3"]]
-            }
-            st.bar_chart(data=chart_data, x="Tier", y="Pages", color=["#4CAF50"])
-            
-        with c2:
-            st.write("**Line Items:**")
-            p_data = result["pricing_breakdown"]
-            st.write(f"- Tier 1 Content: **${p_data['Tier 1 Total']}**")
-            st.write(f"- Tier 2 Content: **${p_data['Tier 2 Total']}**")
-            st.write(f"- Tier 3 Content: **${p_data['Tier 3 Total']}**")
-            
-            if is_rush:
-                 st.markdown("---")
-                 st.write("🔴 **Rush Surcharge Applied (2x)**")
-            
-            if p_data["Minimum Applied"]:
-                st.markdown("---")
-                st.warning("⚠️ Minimum Project Fee ($25.00) Applied")
-            
-            st.markdown("---")
-            st.write(f"### Total: ${result['estimated_cost']}")
+        # Prepare data rows
+        rows = [
+            ["Tier 1 (Simple Content)", f"{result['tiers']['Tier 1']} pgs", f"${p_data['Tier 1 Total']:.2f}"],
+            ["Tier 2 (Structured)",    f"{result['tiers']['Tier 2']} pgs", f"${p_data['Tier 2 Total']:.2f}"],
+            ["Tier 3 (Complex/Tables)",f"{result['tiers']['Tier 3']} pgs", f"${p_data['Tier 3 Total']:.2f}"],
+        ]
+        
+        # Convert to DataFrame for a clean table look
+        df_display = pd.DataFrame(rows, columns=["Item Description", "Quantity", "Subtotal"])
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+        # Show Rush/Min warnings in small text
+        if is_rush:
+            st.caption("🔴 *Rush surcharge (2x) included in subtotals above.*")
+        
+        if p_data["Minimum Applied"]:
+            st.warning("⚠️ Minimum Project Floor ($25.00) Applied")
+
+        # --- 3. COST BREAKDOWN GRAPH (MOVED DOWN) ---
+        st.markdown("##### 📊 Page Tier Distribution")
+        
+        chart_data = {
+            "Tier": ["Tier 1", "Tier 2", "Tier 3"],
+            "Pages": [result["tiers"]["Tier 1"], result["tiers"]["Tier 2"], result["tiers"]["Tier 3"]]
+        }
+        # Using a smaller height for the chart to fit better
+        st.bar_chart(data=chart_data, x="Tier", y="Pages", color=["#4CAF50"], height=250)
+
+```
