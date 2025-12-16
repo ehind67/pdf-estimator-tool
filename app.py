@@ -20,11 +20,9 @@ st.markdown("""
         padding-top: 2rem;
         padding-bottom: 2rem;
     }
-    /* Shrink the big Metric numbers */
     div[data-testid="stMetricValue"] {
         font-size: 1.5rem !important;
     }
-    /* Shrink Metric Labels */
     div[data-testid="stMetricLabel"] {
         font-size: 0.9rem !important;
     }
@@ -46,16 +44,15 @@ class PDFComplexityAssessor:
             "tiers": {"Tier 1": 0, "Tier 2": 0, "Tier 3": 0},
             "elements": {"forms": 0, "images": 0, "tables_suspected": 0},
             "estimated_cost": 0.0,
-            "complexity_breakdown": []
+            "complexity_breakdown": [],
+            "pricing_breakdown": {}
         }
 
     def analyze(self):
         try:
-            # Open PDF from stream
             pdf = pikepdf.Pdf.open(self.stream)
             self.report["total_pages"] = len(pdf.pages)
             
-            # Check Tagging
             try:
                 mark_info = pdf.Root.MarkInfo
                 if mark_info.Marked:
@@ -63,24 +60,13 @@ class PDFComplexityAssessor:
             except (AttributeError, KeyError):
                 self.report["is_tagged"] = False
 
-            # Progress Bar (Small)
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-
-            # Page Loop
             for i, page in enumerate(pdf.pages):
-                progress = (i + 1) / self.report["total_pages"]
-                progress_bar.progress(progress)
                 self._assess_page(page, i + 1)
-
-            status_text.empty()
-            progress_bar.empty()
             
             self._calculate_pricing()
             return self.report
 
         except Exception as e:
-            st.error(f"Error analyzing PDF: {str(e)}")
             return None
 
     def _assess_page(self, page, page_num):
@@ -114,7 +100,6 @@ class PDFComplexityAssessor:
             except:
                 pass
 
-        # Determine Tier
         if page_score < 5:
             tier = "Tier 1"
         elif 5 <= page_score < 15:
@@ -128,15 +113,9 @@ class PDFComplexityAssessor:
         )
 
     def _calculate_pricing(self):
-        # Rates
-        rates = {
-            "Tier 1": 10.00,
-            "Tier 2": 17.50,
-            "Tier 3": 35.00
-        }
+        rates = {"Tier 1": 10.00, "Tier 2": 17.50, "Tier 3": 35.00}
         MIN_CHARGE = 25.00
         
-        # 1. Apply Multiplier
         multiplier = 2.0 if self.is_rush_order else 1.0
         
         t1_cost = self.report["tiers"]["Tier 1"] * rates["Tier 1"] * multiplier
@@ -144,19 +123,16 @@ class PDFComplexityAssessor:
         t3_cost = self.report["tiers"]["Tier 3"] * rates["Tier 3"] * multiplier
         
         raw_total = t1_cost + t2_cost + t3_cost
-        
-        # 2. Min Charge Logic
         final_total = max(raw_total, MIN_CHARGE)
         min_applied = raw_total < MIN_CHARGE
         
         self.report["estimated_cost"] = round(final_total, 2)
         
-        # Store formatted breakdown
         self.report["pricing_breakdown"] = {
             "Tier 1 Total": round(t1_cost, 2),
             "Tier 2 Total": round(t2_cost, 2),
             "Tier 3 Total": round(t3_cost, 2),
-            "Rush Multiplier Applied": "Yes (2x)" if self.is_rush_order else "No",
+            "Rush Multiplier Applied": self.is_rush_order,
             "Minimum Applied": min_applied
         }
 
@@ -174,78 +150,95 @@ with st.sidebar:
     * **T1 (Simple):** $10.00/pg
     * **T2 (Struct):** $17.50/pg
     * **T3 (Complex):** $35.00/pg
-    * **Min Floor:** $25.00
+    * **Min Floor:** $25.00 (per file)
     """)
 
-# File Upload
-uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
+# Multi-File Upload
+uploaded_files = st.file_uploader("Upload PDFs", type=["pdf"], accept_multiple_files=True)
 
-if uploaded_file is not None:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-        tmp_file.write(uploaded_file.getbuffer())
-        tmp_path = tmp_file.name
+if uploaded_files:
+    results = []
+    total_project_cost = 0
+    total_pages_all = 0
+    
+    # Progress bar for batch processing
+    progress_bar = st.progress(0)
+    
+    for i, uploaded_file in enumerate(uploaded_files):
+        # Update progress
+        progress_bar.progress((i) / len(uploaded_files))
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+            tmp_file.write(uploaded_file.getbuffer())
+            tmp_path = tmp_file.name
 
-    assessor = PDFComplexityAssessor(tmp_path, is_rush)
-    result = assessor.analyze()
-    os.remove(tmp_path)
+        assessor = PDFComplexityAssessor(tmp_path, is_rush)
+        res = assessor.analyze()
+        os.remove(tmp_path)
+        
+        if res:
+            res['filename'] = uploaded_file.name
+            results.append(res)
+            total_project_cost += res['estimated_cost']
+            total_pages_all += res['total_pages']
+            
+    progress_bar.progress(1.0)
+    progress_bar.empty()
 
-    if result:
+    if results:
         st.divider()
 
-        # --- 1. HEADER & STATUS CALLOUT ---
-        # Using columns to put File Name and Status side-by-side
-        h_col1, h_col2 = st.columns([3, 1])
+        # --- 1. AGGREGATE DASHBOARD ---
+        h_col1, h_col2, h_col3 = st.columns(3)
+        h_col1.metric("Total Files", len(results))
+        h_col2.metric("Total Pages", total_pages_all)
         
-        with h_col1:
-            st.markdown(f"### 📂 {uploaded_file.name}")
-        
-        with h_col2:
-            if result["is_tagged"]:
-                st.success("✅ Tagged / PDF/UA Ready")
-            else:
-                st.error("⚠️ Untagged / Critical")
-
-        st.markdown("---") # Thin separator
-        
-        # --- 2. COMPACT METRICS (3 Columns Only) ---
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Pages", result["total_pages"])
-
         rush_label = "Active (2x)" if is_rush else "Standard"
-        c2.metric("Mode", rush_label)
-
-        c3.metric("Est. Quote", f"${result['estimated_cost']:.2f}")
+        h_col3.metric("Project Total", f"${total_project_cost:.2f}", delta=rush_label)
 
         st.divider()
 
-        # --- 3. LINE ITEMS SUMMARY ---
-        st.markdown("##### 🧾 Line Items Summary")
+        # --- 2. FILE-BY-FILE BREAKDOWN ---
+        st.markdown("##### 📂 File-by-File Analysis")
         
-        # Create a clean dataframe for display
-        p_data = result["pricing_breakdown"]
+        # Prepare table data
+        table_rows = []
+        for r in results:
+            status_icon = "✅" if r["is_tagged"] else "⚠️"
+            min_flag = " (Min Fee)" if r["pricing_breakdown"]["Minimum Applied"] else ""
+            
+            table_rows.append({
+                "File Name": f"{status_icon} {r['filename']}",
+                "Pages": r['total_pages'],
+                "Tier 1": r['tiers']['Tier 1'],
+                "Tier 2": r['tiers']['Tier 2'],
+                "Tier 3": r['tiers']['Tier 3'],
+                "Cost": f"${r['estimated_cost']:.2f}{min_flag}"
+            })
         
-        # Prepare data rows
-        rows = [
-            ["Tier 1 (Simple Content)", f"{result['tiers']['Tier 1']} pgs", f"${p_data['Tier 1 Total']:.2f}"],
-            ["Tier 2 (Structured)",    f"{result['tiers']['Tier 2']} pgs", f"${p_data['Tier 2 Total']:.2f}"],
-            ["Tier 3 (Complex/Tables)",f"{result['tiers']['Tier 3']} pgs", f"${p_data['Tier 3 Total']:.2f}"],
-        ]
-        
-        # Convert to DataFrame
-        df_display = pd.DataFrame(rows, columns=["Item Description", "Quantity", "Subtotal"])
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        df_files = pd.DataFrame(table_rows)
+        st.dataframe(df_files, use_container_width=True, hide_index=True)
 
-        if is_rush:
-            st.caption("🔴 *Rush surcharge (2x) included in subtotals above.*")
-        
-        if p_data["Minimum Applied"]:
-            st.warning("⚠️ Minimum Project Floor ($25.00) Applied")
-
-        # --- 4. COST BREAKDOWN GRAPH ---
-        st.markdown("##### 📊 Page Tier Distribution")
-        
-        chart_data = {
-            "Tier": ["Tier 1", "Tier 2", "Tier 3"],
-            "Pages": [result["tiers"]["Tier 1"], result["tiers"]["Tier 2"], result["tiers"]["Tier 3"]]
-        }
-        st.bar_chart(data=chart_data, x="Tier", y="Pages", color=["#4CAF50"], height=250)
+        # --- 3. DETAILED BREAKDOWN (Expandable) ---
+        with st.expander("View Consolidated Line Items"):
+            # Sum up tiers across all files
+            grand_t1 = sum(r['tiers']['Tier 1'] for r in results)
+            grand_t2 = sum(r['tiers']['Tier 2'] for r in results)
+            grand_t3 = sum(r['tiers']['Tier 3'] for r in results)
+            
+            # Calculate raw costs (re-calculating to handle the aggregation display)
+            rates = {1: 10.0, 2: 17.5, 3: 35.0}
+            mult = 2.0 if is_rush else 1.0
+            
+            col_a, col_b = st.columns([1,1])
+            with col_a:
+                st.markdown("**Consolidated Quantities**")
+                st.write(f"- **Tier 1 Pages:** {grand_t1}")
+                st.write(f"- **Tier 2 Pages:** {grand_t2}")
+                st.write(f"- **Tier 3 Pages:** {grand_t3}")
+            
+            with col_b:
+                st.markdown("**Notes**")
+                if is_rush:
+                    st.caption("🔴 Rush multiplier applied to all files.")
+                st.caption(f"Minimum floor ($25) applies per individual file.")
