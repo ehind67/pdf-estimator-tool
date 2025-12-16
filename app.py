@@ -247,5 +247,3 @@ if uploaded_file is not None:
         }
         # Using a smaller height for the chart to fit better
         st.bar_chart(data=chart_data, x="Tier", y="Pages", color=["#4CAF50"], height=250)
-
-```
